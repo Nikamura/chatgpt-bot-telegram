@@ -3,6 +3,10 @@ dotenv.config();
 
 import { Bot } from "grammy";
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from "openai";
+import { Op } from "sequelize";
+import { Sequelize } from "sequelize-typescript";
+import { PersonalHistory } from "./personal-history";
+import { SharedHistory } from "./shared-history";
 
 const configuration = new Configuration({
   apiKey: process.env.OPENAI_API_KEY,
@@ -10,9 +14,6 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 
 const bot = new Bot(process.env.TELEGRAM_BOT_KEY!);
-
-const history: Record<number, Array<ChatCompletionRequestMessage>> = {};
-const sharedHistory: Array<ChatCompletionRequestMessage> = [];
 
 const configurationPrompts: Array<ChatCompletionRequestMessage> = [
   {
@@ -22,6 +23,13 @@ const configurationPrompts: Array<ChatCompletionRequestMessage> = [
   },
 ];
 
+const sequelize = new Sequelize({
+  dialect: "sqlite",
+  storage: "database.sqlite",
+  logging: false,
+  models: [SharedHistory, PersonalHistory],
+});
+
 const getMessage = async (
   prompt: Array<ChatCompletionRequestMessage>
 ): Promise<string> => {
@@ -29,7 +37,11 @@ const getMessage = async (
     model: "gpt-3.5-turbo",
     messages: [...configurationPrompts, ...prompt],
   });
-  console.log(`Tokens used: ${completion.data.usage?.total_tokens}`);
+  console.log(
+    `Tokens used: ${completion.data.usage?.total_tokens} by ${
+      prompt[prompt.length - 1].name
+    }}`
+  );
   return completion.data.choices[0].message?.content ?? "Reply not found!";
 };
 
@@ -47,33 +59,77 @@ bot.command("chat", async (ctx) => {
   const message = ctx.message?.text?.replace("/chat ", "");
   if (!message) return;
 
-  history[fromId] = history[fromId] ?? [];
-  history[fromId].push({ role: "user", content: message });
-  const reply = await getMessage(history[fromId].slice(-10));
+  new PersonalHistory({
+    userId: fromId,
+    role: "user",
+    content: message,
+    name: ctx.from?.username ?? ctx.from?.first_name ?? "Unknown name",
+  }).save();
+
+  const messages = (
+    await PersonalHistory.findAll({
+      order: [["id", "DESC"]],
+      limit: 25,
+      where: { userId: { [Op.eq]: fromId } },
+    })
+  )
+    .reverse()
+    .map(
+      (m) =>
+        <ChatCompletionRequestMessage>{
+          role: m.role,
+          content: m.content,
+          name: m.name,
+        }
+    );
+
+  const reply = await getMessage(messages);
   ctx.reply(reply, {
     reply_to_message_id: ctx.message?.message_id,
   });
 
-  history[fromId].push({
+  new PersonalHistory({
     role: "assistant",
     content: reply,
-  });
+    name: "Oracle",
+    userId: fromId,
+  }).save();
 });
 
 bot.command("shared", async (ctx) => {
   const message = ctx.message?.text?.replace("/shared ", "");
   if (!message) return;
 
-  sharedHistory.push({ role: "user", content: message });
-  const reply = await getMessage(sharedHistory.slice(-25));
+  new SharedHistory({
+    role: "user",
+    content: message,
+    name: ctx.from?.username ?? ctx.from?.first_name ?? "Unknown name",
+  }).save();
+
+  const messages = (
+    await SharedHistory.findAll({ order: [["id", "DESC"]], limit: 25 })
+  )
+    .reverse()
+    .map(
+      (m) =>
+        <ChatCompletionRequestMessage>{
+          role: m.role,
+          content: m.content,
+          name: m.name,
+        }
+    );
+  const reply = await getMessage(messages);
   ctx.reply(reply, {
     reply_to_message_id: ctx.message?.message_id,
   });
 
-  sharedHistory.push({
+  new SharedHistory({
     role: "assistant",
     content: reply,
-  });
+    name: "Oracle",
+  }).save();
 });
 
-bot.start();
+sequelize.sync().then(() => {
+  bot.start();
+});
