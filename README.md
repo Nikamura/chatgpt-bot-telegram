@@ -20,3 +20,9 @@ There is shared history for everyone.
 OPENAI_API_KEY=
 TELEGRAM_BOT_KEY=
 ```
+
+### Building
+
+```
+docker buildx build -f Dockerfile . --push --platform=linux/amd64 --tag registry.karolis.host/chatgptbot:latest
+```

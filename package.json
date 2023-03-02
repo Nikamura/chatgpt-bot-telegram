@@ -1,6 +1,8 @@
 {
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only bot.ts"
+    "build": "tsc",
+    "start": "node dist/bot.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/bot.ts"
   },
   "devDependencies": {
     "ts-node-dev": "^2.0.0",

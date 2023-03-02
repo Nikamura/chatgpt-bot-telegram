@@ -13,19 +13,20 @@ const configuration = new Configuration({
 });
 const openai = new OpenAIApi(configuration);
 
+const BOT_NAME = "Oracle";
+
 const bot = new Bot(process.env.TELEGRAM_BOT_KEY!);
 
 const configurationPrompts: Array<ChatCompletionRequestMessage> = [
   {
     role: "system",
-    content:
-      "You are a helpful assistant Oracle. Integrated as Telegram Bot. Your responses should be short and to the point.",
+    content: `You are a helpful assistant ${BOT_NAME}. Integrated as Telegram Bot. Your responses should be short and to the point.`,
   },
 ];
 
 const sequelize = new Sequelize({
   dialect: "sqlite",
-  storage: "database.sqlite",
+  storage: "db/database.sqlite",
   logging: false,
   models: [SharedHistory, PersonalHistory],
 });
@@ -91,7 +92,7 @@ bot.command("chat", async (ctx) => {
   new PersonalHistory({
     role: "assistant",
     content: reply,
-    name: "Oracle",
+    name: BOT_NAME,
     userId: fromId,
   }).save();
 });
@@ -126,10 +127,11 @@ bot.command("shared", async (ctx) => {
   new SharedHistory({
     role: "assistant",
     content: reply,
-    name: "Oracle",
+    name: BOT_NAME,
   }).save();
 });
 
 sequelize.sync().then(() => {
+  console.log("Database synced! Running bot!");
   bot.start();
 });
