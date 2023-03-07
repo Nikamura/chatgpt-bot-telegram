@@ -1,12 +1,18 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 
-import { Bot } from "grammy";
+import { Bot, InputFile } from "grammy";
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from "openai";
 import { Op } from "sequelize";
 import { Sequelize } from "sequelize-typescript";
 import { PersonalHistory } from "./personal-history";
 import { SharedHistory } from "./shared-history";
+
+import { run } from "@grammyjs/runner";
+
+import { HfInference } from "@huggingface/inference";
+
+const hf = new HfInference(process.env.HF_API_KEY);
 
 const configuration = new Configuration({
   apiKey: process.env.OPENAI_API_KEY,
@@ -41,7 +47,7 @@ const getMessage = async (
   console.log(
     `Tokens used: ${completion.data.usage?.total_tokens} by ${
       prompt[prompt.length - 1].name
-    }}`
+    }`
   );
   return completion.data.choices[0].message?.content ?? "Reply not found!";
 };
@@ -97,6 +103,35 @@ bot.command("chat", async (ctx) => {
   }).save();
 });
 
+bot.command("sd", async (ctx) => {
+  const message = ctx.message?.text?.replace("/sd ", "");
+  if (!message) return;
+
+  console.log(`RUNNING IMAGE: ${message}`);
+  try {
+    const image = await hf.textToImage({
+      inputs: message,
+      model: "stabilityai/stable-diffusion-2-1",
+    });
+
+    console.log("RAN IMAGE");
+
+    ctx.replyWithPhoto(new InputFile(new Uint8Array(image)), {
+      reply_to_message_id: ctx.message?.message_id,
+    });
+  } catch (err: any) {
+    console.error(err);
+    ctx.reply(
+      `Error generating image: ${
+        "message" in err ? err.message : "Unknown err"
+      }`,
+      {
+        reply_to_message_id: ctx.message?.message_id,
+      }
+    );
+  }
+});
+
 bot.command("shared", async (ctx) => {
   const message = ctx.message?.text?.replace("/shared ", "");
   if (!message) return;
@@ -133,5 +168,5 @@ bot.command("shared", async (ctx) => {
 
 sequelize.sync().then(() => {
   console.log("Database synced! Running bot!");
-  bot.start();
+  run(bot);
 });
