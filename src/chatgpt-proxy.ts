@@ -1,7 +1,7 @@
 import { createParser } from "eventsource-parser";
 
 import { v4 as uuidv4 } from "uuid";
-
+import pTimeout from "p-timeout";
 export type Role = "user" | "assistant" | "system";
 
 export type Message = {
@@ -147,7 +147,9 @@ export class ChatGPTProxy {
     const resp = await fetch(this.proxyUrl + `/${conversationId}`, {
       headers,
     });
-    return resp.json().then((json) => json.current_node);
+    const msg = await resp.json().then((json) => json.current_node);
+    console.log({ getConversationLastMessageId: msg });
+    return msg;
   }
   public async sendMessage(
     text: string,
@@ -196,7 +198,9 @@ export class ChatGPTProxy {
       text: "",
     };
 
-    return new Promise<ChatMessage>((resolve, reject) => {
+    const abortController: AbortController = new AbortController();
+
+    const responseP = new Promise<ChatMessage>((resolve, reject) => {
       const url = this.proxyUrl;
       const headers = {
         Authorization: `Bearer ${this.accessToken}`,
@@ -241,19 +245,20 @@ export class ChatGPTProxy {
         }
       };
       const parser = createParser((event) => {
-        console.log({ event });
+        // console.log({ event });
         if (event.type === "event") {
-          console.log({ data: event.data });
+          console.log(event.data);
           onMessage(event.data);
         }
       });
 
-      console.log({ headers, body });
+      // console.log({ headers, body });
 
       fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: abortController.signal,
       }).then(async (res) => {
         if (!res.ok) {
           res.text().then((text) => {
@@ -268,5 +273,9 @@ export class ChatGPTProxy {
         }
       });
     });
+    (responseP as any).cancel = () => {
+      abortController.abort();
+    };
+    return pTimeout(responseP, 600000);
   }
 }

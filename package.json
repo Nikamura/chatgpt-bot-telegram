@@ -16,6 +16,7 @@
     "eventsource-parser": "^0.1.0",
     "grammy": "^1.14.1",
     "openai": "^3.2.1",
+    "p-timeout": "^4.1.0",
     "sequelize": "^6.29.0",
     "sequelize-typescript": "^2.1.5",
     "sqlite3": "^5.1.4",

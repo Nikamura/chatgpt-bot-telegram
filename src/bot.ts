@@ -31,8 +31,11 @@ bot.use(
     if (ctx.message?.text?.toLowerCase().startsWith("/sd ")) {
       sequenceId = "sd";
     }
-    if (ctx.message?.text?.toLowerCase().startsWith("/sdprompt ")) {
-      sequenceId = "sdprompt";
+    if (
+      ctx.message?.text?.toLowerCase().startsWith("/sdprompt ") ||
+      ctx.message?.text?.toLowerCase().startsWith("/chatgpt ")
+    ) {
+      sequenceId = "chatgpt";
     }
     return sequenceId;
   })
@@ -80,6 +83,18 @@ const getMessage = async (
   return `${completion.data.choices[0].message?.content}`;
 };
 
+bot.command("commands", (ctx) => {
+  ctx.reply(
+    `Commands: \n
+- /sd - uses stable-diffusion-2.1 to generate images.\n
+- /sdprompt - uses real chatgpt to generate prompts for stable diffusion.\n
+- /chatgpt - uses real chatgpt with shared history.\n
+- /simple - use gpt-3.5-turbo to answer questions without any history.\n
+- /chat - uses gpt-3.5-turbo to answer questions with personal history (6 your messages + 6 AI responses).\n
+- /shared - uses gpt-3.5-turbo to answer questions with shared history (6 messages + 6 AI responses).`
+  );
+});
+
 bot.command("simple", async (ctx) => {
   const message = ctx.message?.text?.replace("/simple ", "");
   if (!message) return;
@@ -90,6 +105,7 @@ bot.command("simple", async (ctx) => {
 });
 
 const sdPromptId = process.env.SD_PROMPT_ID!;
+const gptPromptId = process.env.GPT_PROMPT_ID!;
 
 bot.command("sdprompt", async (ctx) => {
   console.log("GENERATING SD PROMPT");
@@ -101,6 +117,22 @@ bot.command("sdprompt", async (ctx) => {
   const reply = await gpt.sendMessage(`IDEA: ${message}`, {
     parentMessageId: parentMessageId,
     conversationId: sdPromptId,
+  });
+
+  ctx.reply(reply.text, {
+    reply_to_message_id: ctx.message?.message_id,
+  });
+});
+
+bot.command("chatgpt", async (ctx) => {
+  const message = ctx.message?.text?.replace("/chatgpt ", "")?.trim();
+  if (!message) return;
+
+  let parentMessageId = await gpt.getConversationLastMessageId(gptPromptId);
+
+  const reply = await gpt.sendMessage(message, {
+    parentMessageId: parentMessageId,
+    conversationId: gptPromptId,
   });
 
   ctx.reply(reply.text, {
@@ -123,7 +155,7 @@ bot.command("chat", async (ctx) => {
   const messages = (
     await PersonalHistory.findAll({
       order: [["id", "DESC"]],
-      limit: 25,
+      limit: 12,
       where: { userId: { [Op.eq]: fromId } },
     })
   )
@@ -190,7 +222,7 @@ bot.command("shared", async (ctx) => {
   }).save();
 
   const messages = (
-    await SharedHistory.findAll({ order: [["id", "DESC"]], limit: 25 })
+    await SharedHistory.findAll({ order: [["id", "DESC"]], limit: 12 })
   )
     .reverse()
     .map(
