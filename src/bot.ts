@@ -1,7 +1,7 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 
-import { Bot, InputFile } from "grammy";
+import { Bot, Context, InputFile } from "grammy";
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from "openai";
 import { Op } from "sequelize";
 import { Sequelize } from "sequelize-typescript";
@@ -23,10 +23,10 @@ const BOT_NAME = "Oracle";
 
 const bot = new Bot(process.env.TELEGRAM_BOT_KEY!);
 
-const configurationPrompts: Array<ChatCompletionRequestMessage> = [
+const configurationPrompts: () => Array<ChatCompletionRequestMessage> = () => [
   {
     role: "system",
-    content: `You are a helpful assistant ${BOT_NAME}. Integrated as Telegram Bot. Your responses should be short and to the point.`,
+    content: `You are a helpful assistant ${BOT_NAME}. Integrated as Telegram Bot. Your price is $0.002 / 1K tokens. You should try to provide answers that are short and to the point. You should also try to provide answers that are useful to the user. Today is ${new Date().toDateString()}.`,
   },
 ];
 
@@ -38,24 +38,35 @@ const sequelize = new Sequelize({
 });
 
 const getMessage = async (
+  ctx: Context,
   prompt: Array<ChatCompletionRequestMessage>
 ): Promise<string> => {
   const completion = await openai.createChatCompletion({
     model: "gpt-3.5-turbo",
-    messages: [...configurationPrompts, ...prompt],
+    messages: [...configurationPrompts(), ...prompt],
+    temperature: 0.8,
+    top_p: 0.8,
   });
-  console.log(
-    `Tokens used: ${completion.data.usage?.total_tokens} by ${
-      prompt[prompt.length - 1].name
-    }`
-  );
-  return completion.data.choices[0].message?.content ?? "Reply not found!";
+  const tokensUsed = completion.data.usage?.total_tokens ?? 0;
+  const logMessage = `Tokens used: ${tokensUsed} by ${
+    prompt[prompt.length - 1].name
+  } (price: ${(tokensUsed / 1000) * 0.002}$)`;
+  if (process.env.OWNER_USER_ID) {
+    await ctx.api
+      .sendMessage(process.env.OWNER_USER_ID, logMessage)
+      .catch((err) => {
+        console.error("Error while sending log to myself", err);
+      });
+  } else {
+    console.log(logMessage);
+  }
+  return `${completion.data.choices[0].message?.content}`;
 };
 
 bot.command("simple", async (ctx) => {
   const message = ctx.message?.text?.replace("/simple ", "");
   if (!message) return;
-  const reply = await getMessage([{ role: "user", content: message }]);
+  const reply = await getMessage(ctx, [{ role: "user", content: message }]);
   ctx.reply(reply, {
     reply_to_message_id: ctx.message?.message_id,
   });
@@ -90,7 +101,7 @@ bot.command("chat", async (ctx) => {
         }
     );
 
-  const reply = await getMessage(messages);
+  const reply = await getMessage(ctx, messages);
   ctx.reply(reply, {
     reply_to_message_id: ctx.message?.message_id,
   });
@@ -154,7 +165,7 @@ bot.command("shared", async (ctx) => {
           name: m.name,
         }
     );
-  const reply = await getMessage(messages);
+  const reply = await getMessage(ctx, messages);
   ctx.reply(reply, {
     reply_to_message_id: ctx.message?.message_id,
   });
