@@ -8,7 +8,7 @@ import { Sequelize } from "sequelize-typescript";
 import { PersonalHistory } from "./personal-history";
 import { SharedHistory } from "./shared-history";
 
-import { run } from "@grammyjs/runner";
+import { run, sequentialize } from "@grammyjs/runner";
 
 import { HfInference } from "@huggingface/inference";
 import { ChatGPTProxy } from "./chatgpt-proxy";
@@ -24,6 +24,19 @@ const openai = new OpenAIApi(configuration);
 const BOT_NAME = "Oracle";
 
 const bot = new Bot(process.env.TELEGRAM_BOT_KEY!);
+
+bot.use(
+  sequentialize((ctx) => {
+    let sequenceId: string | undefined = undefined;
+    if (ctx.message?.text?.toLowerCase().startsWith("/sd ")) {
+      sequenceId = "sd";
+    }
+    if (ctx.message?.text?.toLowerCase().startsWith("/sdprompt ")) {
+      sequenceId = "sdprompt";
+    }
+    return sequenceId;
+  })
+);
 
 const gpt = new ChatGPTProxy(process.env.OPENAI_ACCESS_TOKEN!);
 
@@ -79,6 +92,7 @@ bot.command("simple", async (ctx) => {
 const sdPromptId = process.env.SD_PROMPT_ID!;
 
 bot.command("sdprompt", async (ctx) => {
+  console.log("GENERATING SD PROMPT");
   const message = ctx.message?.text?.replace("/sdprompt ", "")?.trim();
   if (!message) return;
 
