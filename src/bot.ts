@@ -11,6 +11,8 @@ import { SharedHistory } from "./shared-history";
 import { run } from "@grammyjs/runner";
 
 import { HfInference } from "@huggingface/inference";
+import { ChatGPTProxy } from "./chatgpt-proxy";
+import { Config } from "./config";
 
 const hf = new HfInference(process.env.HF_API_KEY);
 
@@ -23,6 +25,8 @@ const BOT_NAME = "Oracle";
 
 const bot = new Bot(process.env.TELEGRAM_BOT_KEY!);
 
+const gpt = new ChatGPTProxy(process.env.OPENAI_ACCESS_TOKEN!);
+
 const configurationPrompts: () => Array<ChatCompletionRequestMessage> = () => [
   {
     role: "system",
@@ -34,7 +38,7 @@ const sequelize = new Sequelize({
   dialect: "sqlite",
   storage: "db/database.sqlite",
   logging: false,
-  models: [SharedHistory, PersonalHistory],
+  models: [SharedHistory, PersonalHistory, Config],
 });
 
 const getMessage = async (
@@ -68,6 +72,24 @@ bot.command("simple", async (ctx) => {
   if (!message) return;
   const reply = await getMessage(ctx, [{ role: "user", content: message }]);
   ctx.reply(reply, {
+    reply_to_message_id: ctx.message?.message_id,
+  });
+});
+
+const sdPromptId = process.env.SD_PROMPT_ID!;
+
+bot.command("sdprompt", async (ctx) => {
+  const message = ctx.message?.text?.replace("/sdprompt ", "")?.trim();
+  if (!message) return;
+
+  let parentMessageId = await gpt.getConversationLastMessageId(sdPromptId);
+
+  const reply = await gpt.sendMessage(`IDEA: ${message}`, {
+    parentMessageId: parentMessageId,
+    conversationId: sdPromptId,
+  });
+
+  ctx.reply(reply.text, {
     reply_to_message_id: ctx.message?.message_id,
   });
 });
@@ -179,5 +201,6 @@ bot.command("shared", async (ctx) => {
 
 sequelize.sync().then(() => {
   console.log("Database synced! Running bot!");
+
   run(bot);
 });
