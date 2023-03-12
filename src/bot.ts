@@ -1,6 +1,7 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 
+import { writeFileSync } from "fs";
 import { Bot, Context, InputFile } from "grammy";
 import { ChatCompletionRequestMessage, Configuration, OpenAIApi } from "openai";
 import { Op } from "sequelize";
@@ -11,8 +12,8 @@ import { SharedHistory } from "./shared-history";
 import { run, sequentialize } from "@grammyjs/runner";
 
 import { HfInference } from "@huggingface/inference";
-import { ChatGPTProxy } from "./chatgpt-proxy";
 import { Config } from "./config";
+import sdwebui, { SamplingMethod } from "node-sd-webui";
 
 const hf = new HfInference(process.env.HF_API_KEY);
 
@@ -23,25 +24,37 @@ const openai = new OpenAIApi(configuration);
 
 const BOT_NAME = "Oracle";
 
+const sdweb = sdwebui({
+  apiUrl: process.env.AUTOMATIC1111_API,
+});
+
 const bot = new Bot(process.env.TELEGRAM_BOT_KEY!);
+
+bot.catch(async (err) => {
+  console.error(err.error);
+  err.ctx?.reply("An error occurred, sorry!");
+  if (process.env.OWNER_USER_ID) {
+    await err.ctx.api
+      .sendMessage(process.env.OWNER_USER_ID, err.message)
+      .catch((err) => {
+        console.error("Error while sending log to myself", err);
+      });
+  } else {
+    console.error(err.error);
+  }
+});
 
 bot.use(
   sequentialize((ctx) => {
-    let sequenceId: string | undefined = undefined;
     if (ctx.message?.text?.toLowerCase().startsWith("/sd ")) {
-      sequenceId = "sd";
+      return "sd";
     }
-    if (
-      ctx.message?.text?.toLowerCase().startsWith("/sdprompt ") ||
-      ctx.message?.text?.toLowerCase().startsWith("/chatgpt ")
-    ) {
-      sequenceId = "chatgpt";
+    if (ctx.message?.text?.toLowerCase().startsWith("/n18 ")) {
+      return "automatic1111";
     }
-    return sequenceId;
+    return undefined;
   })
 );
-
-const gpt = new ChatGPTProxy(process.env.OPENAI_ACCESS_TOKEN!);
 
 const configurationPrompts: () => Array<ChatCompletionRequestMessage> = () => [
   {
@@ -87,8 +100,6 @@ bot.command("commands", (ctx) => {
   ctx.reply(
     `Commands: \n
 - /sd - uses stable-diffusion-2.1 to generate images.\n
-- /sdprompt - uses real chatgpt to generate prompts for stable diffusion.\n
-- /chatgpt - uses real chatgpt with shared history.\n
 - /simple - use gpt-3.5-turbo to answer questions without any history.\n
 - /chat - uses gpt-3.5-turbo to answer questions with personal history (6 your messages + 6 AI responses).\n
 - /shared - uses gpt-3.5-turbo to answer questions with shared history (6 messages + 6 AI responses).`
@@ -104,39 +115,38 @@ bot.command("simple", async (ctx) => {
   });
 });
 
-const sdPromptId = process.env.SD_PROMPT_ID!;
-const gptPromptId = process.env.GPT_PROMPT_ID!;
-
-bot.command("sdprompt", async (ctx) => {
-  console.log("GENERATING SD PROMPT");
-  const message = ctx.message?.text?.replace("/sdprompt ", "")?.trim();
+bot.command("n18", async (ctx) => {
+  const message = ctx.message?.text?.replace("/n18 ", "");
   if (!message) return;
+  console.log(`Running: ${message}`);
 
-  let parentMessageId = await gpt.getConversationLastMessageId(sdPromptId);
+  let prompt: string = message;
+  let negative: string = "";
 
-  const reply = await gpt.sendMessage(`IDEA: ${message}`, {
-    parentMessageId: parentMessageId,
-    conversationId: sdPromptId,
+  const includesNegative = message.toLocaleLowerCase().includes("negative:");
+  if (includesNegative) {
+    const [msg, ngtv] = message.toLocaleLowerCase().split("negative:", 2);
+    prompt = msg?.trim() ?? "";
+    negative = ngtv?.trim() ?? "";
+  }
+
+  console.log({ prompt, negative });
+  const { images } = await sdweb.txt2img({
+    prompt: prompt,
+    negativePrompt: negative,
+    samplingMethod: SamplingMethod.DPMPlusPlus_2M,
+    width: 512,
+    height: 512,
+    steps: 30,
+    batchSize: 1,
+    cfgScale: 7.5,
   });
 
-  ctx.reply(reply.text, {
+  writeFileSync("/tmp/image.png", images[0], "base64");
+
+  ctx.replyWithPhoto(new InputFile("/tmp/image.png"), {
     reply_to_message_id: ctx.message?.message_id,
-  });
-});
-
-bot.command("chatgpt", async (ctx) => {
-  const message = ctx.message?.text?.replace("/chatgpt ", "")?.trim();
-  if (!message) return;
-
-  let parentMessageId = await gpt.getConversationLastMessageId(gptPromptId);
-
-  const reply = await gpt.sendMessage(message, {
-    parentMessageId: parentMessageId,
-    conversationId: gptPromptId,
-  });
-
-  ctx.reply(reply.text, {
-    reply_to_message_id: ctx.message?.message_id,
+    has_spoiler: true,
   });
 });
 
